@@ -1,0 +1,212 @@
+---
+title: "Exploring the BRFSS data"
+author: "Saikrithika A. Gandhi"
+output: 
+  html_document: 
+    fig_height: 4
+    highlight: pygments
+    theme: spacelab
+---
+
+
+
+
+```{r load-packages, message = FALSE, echo=FALSE}
+library(ggplot2)
+library(dplyr)
+```
+
+```{r load-data, echo = FALSE}
+setwd("~/coursera/r statistics-coursera/DataProject 3")
+load("brfss2013.RData")
+```
+
+```{r}
+nrow(brfss2013)
+ncol(brfss2013)
+```
+
+The dataset contains 491775 observations of  330 variables.
+
+* * *
+##  Research Question
+
+The question I want to explore is to find whether people  who live in different metropolitan areas are affected by asthma differently. The variable `mscode` lists the location of the respondent. The variable `asthnow` lists whether the person currently has asthma. We will subset the dataset to only the columns of interest, i.e., `mscode` and `asthnow`, then filter out all the missing values from the variables for easy handling and manipulation. 
+
+```{r}
+asthma_dataset <- brfss2013 %>% 
+  select(mscode, asthnow) %>% 
+  filter(!is.na(mscode)) %>% filter(!is.na(asthnow))
+```
+
+```{r echo = F}
+str(asthma_dataset)
+```
+
+The dataset has 45,240 observations where both region and asthma were reported. This is a reasonable sized dataset.
+
+The metropolitan area is grouped into five categories, i.e., people who live in the center city of an MSA, outside the center city, inside a suburban county of MSA, In an MSA with no center city and not in MSA. The percentage of people affected by asthma is calculated for each location.
+
+```{r}
+asthma_result <- asthma_dataset %>% 
+  group_by(mscode) %>% 
+  summarise(asthma_percentage = sum(asthnow == "Yes") * 100 / n()) %>% 
+  arrange(desc(asthma_percentage))
+
+
+asthma_result
+```
+
+We will plot the result to visualise and check if there is a significant percentage of people being affected from asthma who live in different areas of metropolitan. Especially for those who live inside and outside MSA. 
+
+```{r}
+ggplot(asthma_result, aes(x=mscode, y= asthma_percentage)) + geom_point()
+```
+
+The graph suggest there was no significant change for people who live inside suburban or outside suburban area. Among those individuals who have reported both the variables, 70-74% of the individuals are affected by asthma. This is a narrow range.  Therefore the location does not seem to change the current asthma status of people. 
+
+We will next explore whether there is statistical support for this thesis.
+
+
+# Difference of two proportions -- Theory
+
+Difference of two proportions is method for an inference with categorical data.  There are two tests:
+
+1. Confidence intervals
+2. Hypothesis test 
+The formulae are slightly different.
+
+Two conditions should apply
+
+1. Each proportion separately follows the normal model
+2. two samples are independent of each other.
+
+**Standard error**
+$$ 
+SE_{p_1 - p_2} = \sqrt{ SE_{p_1}^2 + SE_{p_2}^2 } = 
+\sqrt{ \frac{p_1 (1-p_1)}{n_1} + \frac{p_2 (1-p_2)}{n_2} }
+$$
+
+# Confidence Interval
+
+Let us consider `Not in MSA` as rural areas and all other categories as `non-rural` areas.
+
+1. Create a dataset with column which has regions: rural, urban.
+
+```{r echo = FALSE}
+asthma_not_urban <- asthma_dataset %>% 
+  mutate(region = ifelse(mscode == "Not in an MSA", "rural", "urban")) %>% 
+  group_by(region) %>%
+  summarise(asthma_count = sum(asthnow=="Yes"), total_count = n(), proportion = asthma_count/total_count)
+
+asthma_not_urban
+```
+
+2. Calculate the proportion for asthma in Urban and rural
+
+
+```{r}
+# n1(Total count in urban)
+num_urban <- asthma_not_urban[2,]$total_count
+# p1 (proportion of asthma in urban)
+prop_urban <- asthma_not_urban[2,]$asthma_count/num_urban
+
+# n2(Total count in rural)
+num_rural<- asthma_not_urban[1,]$total_count
+# p2(proportion of asthma in rural)
+prop_rural <- asthma_not_urban[1,]$asthma_count/num_rural
+```
+
+3. Standard error to find CI
+```{r}
+failure_urban <- (1-prop_urban)
+failure_rural <-(1-prop_rural)
+
+std_error <-sqrt(
+      (prop_urban* failure_urban)/num_urban +
+      (prop_rural* failure_rural)/num_rural
+    )
+```
+
+4. Confidence interval
+```{r}
+#conf_interval
+lower_95  <- prop_rural - prop_urban - qnorm(.975) * std_error
+upper_95  <- prop_rural - prop_urban + qnorm(.975) * std_error
+
+paste0(lower_95 *100, ",  ", upper_95 * 100)
+```
+
+5. **Conclusion**
+
+There is a difference between the proportion of reported asthma rural and non-rural areas.
+*
+We are 95% confident that there is a difference in proportion between rural and non-rural areas to the extent of (`r lower_95 *100`, `r upper_95 * 100`)
+*
+
+***
+# Hypothesis testing:
+
+We take the null hypothesis to be that there is no difference between rural and non-rural areas. That is,
+
+**H_0**: proportion of asthma in rural areas - proportion of asthma in non-rural areas = 0 <br/ >
+**HA**: proportion of asthma in rural areas - proportion of asthma in non-rural areas != 0 
+
+$p_1 - p_2 = 0$ is another way of saying $p_1 = p_2$.
+
+## Pooled proportion
+In the case of hypothesis testing we will use _pooled proportion_ to calculate the p-value. The intuition for Pooled proportion is the following. We take the proportion of asthma in the entire population.  This is our best estimate of proportion of asthma in rural as well as non-rural areas.  In other words, we assume that both rural and non-rural areas have the same proportion of asthma.
+
+1. Calculate pooled proportion
+```{r}
+pooled_proportion<- sum(asthma_not_urban$asthma_count) /
+                  sum(asthma_not_urban$total_count)
+```
+
+2. Standard Error using pooled proportion
+```{r}
+# standard error using pooled proportion
+std_error_pooled <-sqrt(
+      (pooled_proportion * (1-pooled_proportion))/num_urban +
+      (pooled_proportion * (1-pooled_proportion))/num_rural
+    )
+```
+
+
+```{r echo=FALSE}
+# TODO: check success-failure condition.
+Success_U <-num_urban * prop_urban
+Failure_U <-num_urban *(1-pooled_proportion)
+Success_r <-num_rural  *prop_rural
+Failure_r <-num_rural * (1-pooled_proportion)
+```
+
+
+3. Compute z-score
+```{r}
+# Z-score
+point_estimate <- (prop_urban - prop_rural)
+z_estimate <- (point_estimate - 0)/std_error_pooled 
+
+z_estimate
+```
+
+```{r}
+p_value = 2*pnorm(z_estimate)
+
+p_value
+
+```
+
+4. **Conclusion** 
+
+Since p-value `r p_value` is less than significance level of 0.5 we reject the null hypothesis. We conclude that there is a significant difference between the rural and non-rural proportions of asthma.
+
+
+# Learnings from this exercise
+
+1. Calculations for confidence interval
+2. Calculations for hypothesis testing using pooled proportion.
+3. Since we are using the same inference framework, the confidence interval and hypothesis testing agree.  That is there is a difference between rural and non-rural groups in the proportion of asthma incidence.
+
+
